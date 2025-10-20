@@ -28,6 +28,7 @@ import java.awt.Component;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -135,9 +136,9 @@ public abstract class AbstractDecompressorEditorTab implements IMessageEditorTab
 			try {
 
 				byte[] decompressed = null;
-				if (detect(content)) {
-					decompressed = decompress(content);
-				}
+                                if (detect(content)) {
+                                        decompressed = prettifyJsonIfApplicable(decompress(content));
+                                }
 				messageEditor.setMessage(decompressed, isRequest);
 
 			} catch (Exception e) {
@@ -197,10 +198,109 @@ public abstract class AbstractDecompressorEditorTab implements IMessageEditorTab
 		StringWriter stringWritter = new StringWriter();
 		PrintWriter printWritter = new PrintWriter(stringWritter, true);
 		t.printStackTrace(printWritter);
-		printWritter.flush();
-		stringWritter.flush();
+                printWritter.flush();
+                stringWritter.flush();
 
-		return stringWritter.toString();
-	}
+                return stringWritter.toString();
+        }
+
+        private byte[] prettifyJsonIfApplicable(byte[] content) {
+                if (content == null || content.length == 0) {
+                        return content;
+                }
+
+                String asString = new String(content, StandardCharsets.UTF_8);
+                String trimmed = asString.trim();
+
+                if (trimmed.isEmpty()) {
+                        return content;
+                }
+
+                char first = trimmed.charAt(0);
+                char last = trimmed.charAt(trimmed.length() - 1);
+                if (!((first == '{' && last == '}') || (first == '[' && last == ']'))) {
+                        return content;
+                }
+
+                try {
+                        String pretty = prettyPrintJson(trimmed);
+                        return pretty.getBytes(StandardCharsets.UTF_8);
+                } catch (Exception e) {
+                        Logger.getLogger(getClass().getName()).log(Level.FINE, "Failed to prettify JSON", e);
+                        return content;
+                }
+        }
+
+        private String prettyPrintJson(String json) {
+                StringBuilder builder = new StringBuilder();
+                int depth = 0;
+                boolean inQuotes = false;
+                boolean escaping = false;
+
+                for (int i = 0; i < json.length(); i++) {
+                        char c = json.charAt(i);
+
+                        if (escaping) {
+                                builder.append(c);
+                                escaping = false;
+                                continue;
+                        }
+
+                        if (c == '\\') {
+                                builder.append(c);
+                                if (inQuotes) {
+                                        escaping = true;
+                                }
+                                continue;
+                        }
+
+                        if (c == '"') {
+                                builder.append(c);
+                                inQuotes = !inQuotes;
+                                continue;
+                        }
+
+                        if (inQuotes) {
+                                builder.append(c);
+                                continue;
+                        }
+
+                        switch (c) {
+                        case '{':
+                        case '[':
+                                builder.append(c).append('\n');
+                                depth++;
+                                appendIndent(builder, depth);
+                                break;
+                        case '}':
+                        case ']':
+                                builder.append('\n');
+                                depth = Math.max(depth - 1, 0);
+                                appendIndent(builder, depth);
+                                builder.append(c);
+                                break;
+                        case ',':
+                                builder.append(c).append('\n');
+                                appendIndent(builder, depth);
+                                break;
+                        case ':':
+                                builder.append(c).append(' ');
+                                break;
+                        default:
+                                if (!Character.isWhitespace(c)) {
+                                        builder.append(c);
+                                }
+                                break;
+                        }
+                }
+
+                return builder.toString();
+        }
+
+        private void appendIndent(StringBuilder builder, int depth) {
+                for (int i = 0; i < depth; i++) {
+                        builder.append("  ");
+                }
+        }
 
 }
